@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from functools import total_ordering
+from typing import overload
 import datetime
 import zoneinfo
 import tzlocal
@@ -13,12 +14,15 @@ import sys
 class Timestamp:
     '''Local date and time along with the time zone.
 
-    Contains an aware datetime timestamp with a ZoneInfo time zone.
+    Contains an aware datetime timestamp with a 'ZoneInfo' time zone.
+
+    Requirements:
+    - 'tzinfo' must be 'zoneinfo.ZoneInfo'.
 
     Notes:
-    - This class strictly stores tzinfo as zoneinfo.ZoneInfo instances
-      (IANA names).
-    - Dependency: tzlocal (for detecting local IANA zone name).'''
+    - This class strictly stores 'tzinfo' as 'zoneinfo.ZoneInfo'
+      instances (IANA names).
+    - Dependency: 'tzlocal' (for detecting local IANA zone name).'''
 
 
     _dt: datetime.datetime
@@ -26,14 +30,16 @@ class Timestamp:
 
     @staticmethod
     def _is_valid_dt(dt: datetime.datetime) -> bool:
-        '''Checks that the datetime variable contains a valid ZoneInfo
-        time zone.'''
+        '''Checks that the 'datetime' variable contains a valid
+        'ZoneInfo' time zone.'''
 
-        return (
-            dt.tzinfo is not None
-            and dt.tzinfo.utcoffset(dt) is not None
-            and isinstance(dt.tzinfo, zoneinfo.ZoneInfo)
-        )
+        if dt.tzinfo is None:
+            return False
+        try:
+            utc_off = dt.tzinfo.utcoffset(dt)
+        except Exception:
+            return False
+        return utc_off is not None and isinstance(dt.tzinfo, zoneinfo.ZoneInfo)
 
 
     def __post_init__(self) -> None:
@@ -64,6 +70,14 @@ class Timestamp:
         return Timestamp(dt_new)
     
 
+    @overload
+    def __sub__(self, other: datetime.timedelta) -> Timestamp: ...
+
+
+    @overload
+    def __sub__(self, other: Timestamp) -> datetime.timedelta: ...
+    
+
     def __sub__(self, other: datetime.timedelta | Timestamp) -> Timestamp | datetime.timedelta:
         '''The offset of a timestamp by a specified interval,
         or the difference between two timestamps.'''
@@ -72,14 +86,16 @@ class Timestamp:
             return Timestamp(self._dt - other)
 
         if isinstance(other, Timestamp):
-            return self._dt - other._dt    # timedelta.
+            return self._dt - other._dt    # 'timedelta'.
 
         return NotImplemented
     
 
     @classmethod
     def from_utc(cls, dt_iso: str) -> Timestamp:
-        '''Parse an ISO 8601 string and return a Timestamp in UTC.
+        '''Parse an ISO 8601 string and return a 'Timestamp' in UTC.
+
+        Any strings containing timestamps with a non-zero offset are rejected.
 
         Accepted examples:
          - '2026-01-20T10:36'         (assumed UTC),
@@ -105,7 +121,8 @@ class Timestamp:
             # Ensure the moment is UTC (offset zero).
             if dt.utcoffset() != datetime.timedelta(0):
                 raise ValueError(f"The timestamp '{dt_iso}' is not in UTC.")
-            # Convert to ZoneInfo('Etc/UTC') to satisfy strict storage invariant.
+            # Convert to 'ZoneInfo('Etc/UTC')' to satisfy strict storage
+            # invariant.
             dt = dt.astimezone(tz_utc)
 
         return cls(dt)
@@ -131,9 +148,7 @@ class Timestamp:
         try:
             return cls(datetime.datetime.now(zoneinfo.ZoneInfo('Etc/UTC')))
         except Exception as e:
-            raise RuntimeError(
-                'Failed to determine local time.'
-            ) from e
+            raise RuntimeError('Failed to determine UTC time.') from e
     
 
     @property
@@ -166,8 +181,9 @@ class Timestamp:
         try:
             tz = zoneinfo.ZoneInfo(timezone_iana)
         except Exception as e:
-            # ZoneInfo raises ZoneInfoNotFoundError (subclass of Exception) on bad names.
-            raise ValueError(f"Invalid IANA time zone: {timezone_iana}") from e
+            # 'ZoneInfo' raises 'ZoneInfoNotFoundError' (subclass
+            # of Exception) on bad names.
+            raise ValueError(f'Invalid IANA time zone: {timezone_iana}') from e
 
         dt = self._dt.astimezone(tz)
         return Timestamp(dt)
