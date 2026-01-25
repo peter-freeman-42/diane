@@ -66,7 +66,10 @@ class Timestamp:
         if not isinstance(other, datetime.timedelta):
             return NotImplemented
 
-        dt_new = self._dt + other
+        tz = self._dt.tzinfo
+        dt_utc = self._dt.astimezone(zoneinfo.ZoneInfo('Etc/UTC'))
+        dt_utc_new = dt_utc + other
+        dt_new = dt_utc_new.astimezone(tz)
         return Timestamp(dt_new)
     
 
@@ -83,10 +86,12 @@ class Timestamp:
         or the difference between two timestamps.'''
 
         if isinstance(other, datetime.timedelta):
-            return Timestamp(self._dt - other)
+            return self + (-other)
 
         if isinstance(other, Timestamp):
-            return self._dt - other._dt    # 'timedelta'.
+            self_dt_utc = self._dt.astimezone(zoneinfo.ZoneInfo('Etc/UTC'))
+            other_dt_utc = other._dt.astimezone(zoneinfo.ZoneInfo('Etc/UTC'))
+            return self_dt_utc - other_dt_utc    # 'timedelta'.
 
         return NotImplemented
     
