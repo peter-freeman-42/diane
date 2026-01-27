@@ -48,7 +48,7 @@ class Timestamp:
         
     
     def __str__(self) -> str:
-        return f'{self.local_iso}, {self.timezone_iana}'
+        return f'{self.datetime_iso}, {self.timezone_iana}'
     
 
     def __eq__(self, other: object) -> bool:
@@ -172,12 +172,12 @@ class Timestamp:
     
 
     @property
-    def local(self) -> datetime.datetime:
+    def datetime(self) -> datetime.datetime:
         return self._dt
     
 
     @property
-    def local_iso(self) -> str:
+    def datetime_iso(self) -> str:
         '''Returns the timestamp in ISO 8601 format in the time zone
         in which it was recorded.'''
         
@@ -630,7 +630,7 @@ class TimeInterval:
 
     @property
     def is_closed(self) -> bool:
-        '''Checks whether the time interval is close.
+        '''Checks whether the time interval is closes.
 
         Here, closeness is understood in a mathematical sense.
         Therefore, an empty interval, a bounded closed interval,
@@ -662,6 +662,42 @@ class TimeInterval:
             and self._start_closed is False
             and self._end_closed is True
         )
+    
+
+    @property
+    def start(self) -> Timestamp | None:
+        '''Returns the start of the time interval. If it is not defined,
+        when the interval is empty or unbounded
+        on the left, returns 'None'.'''
+
+        return self._start
+    
+
+    @property
+    def end(self) -> Timestamp | None:
+        '''Returns the end of the time interval. If it is not defined,
+        when the interval is empty or unbounded
+        on the right, returns 'None'.'''
+
+        return self._end
+
+
+    @property
+    def inf(self) -> Timestamp | None:
+        '''Returns the infimum of the time interval. If it is
+        not defined, when the interval is empty or unbounded
+        on the left, returns 'None'.'''
+
+        return self._start
+    
+
+    @property
+    def sup(self) -> Timestamp | None:
+        '''Returns the supremum of the time interval. If it is
+        not defined, when the interval is empty or unbounded
+        on the right, returns 'None'.'''
+        
+        return self._end
     
 
     @property
@@ -750,3 +786,59 @@ class TimeInterval:
         '''Checks whether a given interval is contained in another.'''
 
         return other.contains(self)
+    
+
+    def is_left_of(self, other: TimeInterval) -> bool:
+        '''Checks that the interval lies strictly to the left
+        of the other one and does not intersect with it.'''
+
+        if self.is_empty or other.is_empty:
+            return True
+        
+        if self._end is not None and other._start is not None:
+            if self._end < other._start:
+                return True
+            if self._end == other._start:
+                return self._end_closed is False or other._start_closed is False
+            
+        return False
+    
+
+    def is_right_of(self, other: TimeInterval) -> bool:
+        '''Checks that the interval lies strictly to the right
+        of the other one and does not intersect with it.'''
+
+        if self.is_empty or other.is_empty:
+            return True
+        
+        if other._end is not None and self._start is not None:
+            if other._end < self._start:
+                return True
+            if other._end == self._start:
+                return other._end_closed is False or  self._start_closed is False
+            
+        return False
+    
+
+    def overlaps(self, other: TimeInterval) -> bool:
+        '''Check if two intervals overlap (have non-empty
+        intersection).'''
+        
+        if self.is_empty or other.is_empty:
+            return False
+
+        # 'self' is completely to the left of 'other'.
+        if self._end is not None and other._start is not None:
+            if self._end < other._start:
+                return False
+            if self._end == other._start:
+                return self._end_closed is True and other._start_closed is True
+
+        # 'other' is completely to the left of 'self'.
+        if other._end is not None and self._start is not None:
+            if other._end < self._start:
+                return False
+            if other._end == self._start:
+                return other._end_closed is True and self._start_closed is True
+
+        return True
