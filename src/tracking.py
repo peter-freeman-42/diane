@@ -25,6 +25,9 @@ class Timestamp:
     - Dependency: 'tzlocal' (for detecting local IANA zone name).'''
 
 
+    _UTC = zoneinfo.ZoneInfo('Etc/UTC')    # UTC time zone.
+
+
     _dt: datetime.datetime
     
 
@@ -57,10 +60,12 @@ class Timestamp:
         if not isinstance(other, Timestamp):
             return NotImplemented
         
-        return (
-            self._dt.astimezone(zoneinfo.ZoneInfo("Etc/UTC")) ==
-            other._dt.astimezone(zoneinfo.ZoneInfo("Etc/UTC"))
-        )
+        return self._dt.astimezone(Timestamp._UTC) == other._dt.astimezone(Timestamp._UTC)
+    
+
+    def __hash__(self) -> int:
+        dt_utc = self._dt.astimezone(Timestamp._UTC)
+        return hash(dt_utc)
     
 
     def __lt__(self, other: object) -> bool:
@@ -69,10 +74,7 @@ class Timestamp:
         if not isinstance(other, Timestamp):
             return NotImplemented
         
-        return (
-            self._dt.astimezone(zoneinfo.ZoneInfo("Etc/UTC")) <
-            other._dt.astimezone(zoneinfo.ZoneInfo("Etc/UTC"))
-        )
+        return self._dt.astimezone(Timestamp._UTC) < other._dt.astimezone(Timestamp._UTC)
     
 
     def __add__(self, other: datetime.timedelta) -> Timestamp:
@@ -82,7 +84,7 @@ class Timestamp:
             return NotImplemented
 
         tz = self._dt.tzinfo
-        dt_utc = self._dt.astimezone(zoneinfo.ZoneInfo('Etc/UTC'))
+        dt_utc = self._dt.astimezone(Timestamp._UTC)
         dt_utc_new = dt_utc + other
         dt_new = dt_utc_new.astimezone(tz)
         return Timestamp(dt_new)
@@ -104,8 +106,8 @@ class Timestamp:
             return self + (-other)
 
         if isinstance(other, Timestamp):
-            self_dt_utc = self._dt.astimezone(zoneinfo.ZoneInfo('Etc/UTC'))
-            other_dt_utc = other._dt.astimezone(zoneinfo.ZoneInfo('Etc/UTC'))
+            self_dt_utc = self._dt.astimezone(Timestamp._UTC)
+            other_dt_utc = other._dt.astimezone(Timestamp._UTC)
             return self_dt_utc - other_dt_utc    # 'timedelta'.
 
         return NotImplemented
@@ -132,18 +134,16 @@ class Timestamp:
         except ValueError as e:
             raise ValueError(f'Invalid ISO 8601 datetime string: {dt_iso}') from e
 
-        tz_utc = zoneinfo.ZoneInfo("Etc/UTC")
-
         if dt.tzinfo is None:
             # Naive: interpret as UTC per method contract.
-            dt = dt.replace(tzinfo=tz_utc)
+            dt = dt.replace(tzinfo=Timestamp._UTC)
         else:
             # Ensure the moment is UTC (offset zero).
             if dt.utcoffset() != datetime.timedelta(0):
                 raise ValueError(f"The timestamp '{dt_iso}' is not in UTC.")
             # Convert to 'ZoneInfo('Etc/UTC')' to satisfy strict storage
             # invariant.
-            dt = dt.astimezone(tz_utc)
+            dt = dt.astimezone(Timestamp._UTC)
 
         return cls(dt)
     
@@ -166,7 +166,7 @@ class Timestamp:
         '''Creates a new timestamp with the current time in UTC.'''
         
         try:
-            return cls(datetime.datetime.now(zoneinfo.ZoneInfo('Etc/UTC')))
+            return cls(datetime.datetime.now(Timestamp._UTC))
         except Exception as e:
             raise RuntimeError('Failed to determine UTC time.') from e
     
@@ -213,7 +213,7 @@ class Timestamp:
         '''Creates a new timestamp by converting the given one
         to UTC.'''
         
-        dt_utc = self._dt.astimezone(zoneinfo.ZoneInfo('Etc/UTC'))
+        dt_utc = self._dt.astimezone(Timestamp._UTC)
         return Timestamp(dt_utc)
     
 
@@ -221,7 +221,7 @@ class Timestamp:
     def utc_iso(self) -> str:
         '''Returns an ISO 8601 string in UTC.'''
     
-        dt_utc = self._dt.astimezone(zoneinfo.ZoneInfo("Etc/UTC"))
+        dt_utc = self._dt.astimezone(Timestamp._UTC)
         return dt_utc.replace(tzinfo=None).isoformat() + 'Z'
 
 
@@ -234,11 +234,46 @@ class TimeInterval:
     a half-open interval, a segment, an open or closed ray,
     or the entire timeline. Here, openness, closedness and boundedness
     are understood in a strict mathematical sense.
+
+    All possible cases:
+    - empty interval:
+          'TimeInterval(_nonempty=False,_start=None, _end=None,
+          _start_closed=None, _end_closed=None)';
+    - open bounded interval:
+          'TimeInterval(_nonempty=True, _start=start, _end=end,
+          _start_closed=False, _end_closed=False)';
+    - closed bounded interval:
+          'TimeInterval(_nonempty=True, _start=start, _end=end,
+          _start_closed=True, _end_closed=True)';
+    - closed-open interval:
+          'TimeInterval(_nonempty=True, _start=start, _end=end,
+          _start_closed=True, _end_closed=False)';
+    - open-closed interval:
+          'TimeInterval(_nonempty=True, _start=start, _end=end,
+          _start_closed=False, _end_closed=True)';
+    - right closed ray:
+          'TimeInterval(_nonempty=True, _start=start, _end=None,
+          _start_closed = True, _end_closed=False)';
+    - right open ray:
+          'TimeInterval(_nonempty=True, _start=start, _end=None,
+          _start_closed = False, _end_closed=False)';
+    - left closed ray:
+          'TimeInterval(_nonempty=True, _start=None, _end=end,
+          _start_closed = False, _end_closed=True)';
+    - left open ray:
+          'TimeInterval(_nonempty=True, _start=None, _end=end,
+          _start_closed = False, _end_closed=False)';
+    - entire timeline:
+          'TimeInterval(_nonempty=True, _start=None, _end=None,
+          _start_closed = False, _end_closed=False);
+    where 'start' and 'end' are 'datetime.datetime'.
     
     If the interval is empty, then '_nonempty' is set to 'False' and all
     the other fields are set to 'None'. If the interval is not empty,
     then '_nonempty' is True and all the other fields must define
-    a valid interval.'''
+    a valid interval. When '_start' is 'None', then '_start_closed'
+    must be 'False' (and similarly for '_end'). Use ready-made
+    constructors to create new intervals.'''
 
 
     _nonempty: bool = False
@@ -357,9 +392,18 @@ class TimeInterval:
         return not self.is_empty
     
 
-    def __contains__(self, moment: Timestamp) -> bool:
+    def __len__(self) -> int:
+        '''Returns the number of connected components.'''
+
+        return int(self._nonempty)
+    
+
+    def __contains__(self, moment: object) -> bool:
         '''Checks whether the given moment in time falls within the time
         interval.'''
+
+        if not isinstance(moment, Timestamp):
+            return False
 
         if self.is_empty:
             # An empty time interval contains nothing.
@@ -581,6 +625,13 @@ class TimeInterval:
 
 
     @property
+    def is_nonempty(self) -> bool:
+        '''Checks whether the time interval is non-empty.'''
+
+        return self._nonempty
+
+
+    @property
     def is_empty(self) -> bool:
         '''Checks whether the time interval is empty.'''
 
@@ -598,6 +649,13 @@ class TimeInterval:
             self._start is not None
             and self._end is not None
         )
+    
+
+    @property
+    def is_connected(self) -> bool:
+        '''Any interval is connected.'''
+
+        return True
     
 
     @property
@@ -790,11 +848,16 @@ class TimeInterval:
 
     def is_left_of(self, other: TimeInterval) -> bool:
         '''Checks that the interval lies strictly to the left
-        of the other one and does not intersect with it.'''
+        of the other one and does not intersect with it.
+        
+        This is automatically true if any of the time intervals
+        are empty.'''
 
         if self.is_empty or other.is_empty:
             return True
-        
+        # From this point onwards, both intervals are considered
+        # to be non-empty.
+
         if self._end is not None and other._start is not None:
             if self._end < other._start:
                 return True
@@ -806,16 +869,21 @@ class TimeInterval:
 
     def is_right_of(self, other: TimeInterval) -> bool:
         '''Checks that the interval lies strictly to the right
-        of the other one and does not intersect with it.'''
+        of the other one and does not intersect with it.
+        
+        This is automatically true if any of the time intervals
+        are empty.'''
 
         if self.is_empty or other.is_empty:
             return True
-        
+        # From this point onwards, both intervals are considered
+        # to be non-empty.
+
         if other._end is not None and self._start is not None:
             if other._end < self._start:
                 return True
             if other._end == self._start:
-                return other._end_closed is False or  self._start_closed is False
+                return other._end_closed is False or self._start_closed is False
             
         return False
     
@@ -842,3 +910,172 @@ class TimeInterval:
                 return other._end_closed is True and self._start_closed is True
 
         return True
+    
+
+    def is_left_of_disconnectedly(self, other: TimeInterval) -> bool:
+        '''Checks that the interval lies strictly to the left
+        of the other one, does not intersect with it and their union
+        will be a disconnected set.
+        
+        This is not true if at least one of the intervals is non-empty,
+        because a disconnected union is required.'''
+
+        if self.is_empty or other.is_empty:
+            return False
+        # From this point onwards, both intervals are considered
+        # to be non-empty.
+        
+        if self._end is not None and other._start is not None:
+            if self._end < other._start:
+                return True
+            if self._end == other._start:
+                return self._end_closed is False and other._start_closed is False
+            
+        return False
+    
+
+    def is_right_of_disconnectedly(self, other: TimeInterval) -> bool:
+        '''Checks that the interval lies strictly to the right
+        of the other one, does not intersect with it and their union
+        will be a disconnected set.
+        
+        This is not true if at least one of the intervals is non-empty,
+        because a disconnected union is required.'''
+
+        if self.is_empty or other.is_empty:
+            return False
+        # From this point onwards, both intervals are considered
+        # to be non-empty.
+        
+        if other._end is not None and self._start is not None:
+            if other._end < self._start:
+                return True
+            if other._end == self._start:
+                return other._end_closed is False and self._start_closed is False
+            
+        return False
+        
+    
+
+@dataclass(frozen=True)
+class TimeSet:
+    '''Disjoint union of time intervals 'TimeInterval'.
+    
+    All component intervals must be non-empty and in chronological 
+    order. They must also not overlap. Furthermore, all their pairwise
+    unions must be disconnected. In other words, each interval
+    is connected component of the 'TimeSet'.'''
+
+    _intervals: tuple[TimeInterval]
+
+
+    def _is_valid(self) -> bool:
+        '''Checks whether the 'TimeSet' is set correctly.'''
+
+        for i in self._intervals:
+            if i.is_empty:
+                return False
+
+        for l, r in zip(self._intervals, self._intervals[1:]):
+            if not l.is_left_of_disconnectedly(r):
+                return False
+        
+        return True
+    
+
+    def __init__(self, *intervals: TimeInterval | tuple[TimeInterval]):
+        if len(intervals) == 1 and isinstance(intervals[0], tuple):
+            intervals = intervals[0]
+        object.__setattr__(self, "_intervals", tuple(intervals))
+        if not self._is_valid():
+            raise ValueError('The \'TimeSet\' has been set incorrectly.')
+    
+
+    def __str__(self) -> str:
+        if not self._intervals:
+            # Returns the empty set symbol.
+            return '\u2205'
+        return ' \u2294\n'.join(map(str, self._intervals))
+    
+
+    def __bool__(self) -> bool:
+        '''Checks whether the time set is non-empty.'''
+
+        return bool(self._intervals)
+    
+
+    def __len__(self) -> int:
+        '''Returns the number of connected components.'''
+
+        return len(self._intervals)
+    
+
+    @property
+    def is_nonempty(self) -> bool:
+        '''Checks whether the time set is non-empty.'''
+
+        return bool(self._intervals)
+
+
+    @property
+    def is_empty(self) -> bool:
+        '''Checks whether the time set is empty.'''
+
+        return not self._intervals
+    
+
+    @property
+    def is_bounded(self) -> bool:
+        '''Checks whether the time set is bounded.
+        
+        Here, boundedness is understood in a mathematical sense.
+        Therefore an empty set is considered bounded.'''
+
+        if self.is_empty:
+            return True
+        # From this point onwards, the set is considered
+        # to be non-empty.
+
+        # Check the first and last intervals for boundedness.
+        return self._intervals[0].is_bounded and self._intervals[-1].is_bounded
+
+
+    @property
+    def is_connected(self) -> bool:
+        '''Checks whether the time set is connected.
+        
+        A time set is connected if it has no more than one connected 
+        component.'''
+
+        return len(self) <= 1
+    
+
+    @property
+    def is_point(self) -> bool:
+        '''Checks whether the time set is a point.'''
+
+        return len(self) == 1 and self._intervals[0].is_point
+    
+
+    @property
+    def is_open(self) -> bool:
+        '''Checks whether the time set is open.'''
+
+        if self.is_empty:
+            return True
+        # From this point onwards, the set is considered
+        # to be non-empty.
+
+        return all(i.is_open for i in self._intervals)
+    
+
+    @property
+    def is_closed(self) -> bool:
+        '''Checks whether the time set is closed.'''
+
+        if self.is_empty:
+            return True
+        # From this point onwards, the set is considered
+        # to be non-empty.
+
+        return all(i.is_closed for i in self._intervals)
