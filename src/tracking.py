@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from functools import total_ordering
 from typing import overload
+from enum import Enum, auto
 import datetime
 import zoneinfo
 import tzlocal
@@ -228,174 +229,215 @@ class Timestamp:
 
 @dataclass(frozen=True)
 class TimeInterval:
-    '''A time interval.
+    '''A time interval. Represents a connected subset of the time axis.
 
-    This can be an empty interval, a point, an open interval,
-    a half-open interval, a segment, an open or closed ray,
-    or the entire timeline. Here, openness, closedness and boundedness
-    are understood in a strict mathematical sense.
+    This can be an empty set, a point, an open interval,
+    a half-open interval, a closed interval, an open or closed ray,
+    or the entire timeline.'''
 
-    All possible cases:
-    - empty interval:
-          'TimeInterval(_nonempty=False,_start=None, _end=None,
-          _start_closed=None, _end_closed=None)';
-    - open bounded interval:
-          'TimeInterval(_nonempty=True, _start=start, _end=end,
-          _start_closed=False, _end_closed=False)';
-    - closed bounded interval:
-          'TimeInterval(_nonempty=True, _start=start, _end=end,
-          _start_closed=True, _end_closed=True)';
-    - closed-open interval:
-          'TimeInterval(_nonempty=True, _start=start, _end=end,
-          _start_closed=True, _end_closed=False)';
-    - open-closed interval:
-          'TimeInterval(_nonempty=True, _start=start, _end=end,
-          _start_closed=False, _end_closed=True)';
-    - right closed ray:
-          'TimeInterval(_nonempty=True, _start=start, _end=None,
-          _start_closed = True, _end_closed=False)';
-    - right open ray:
-          'TimeInterval(_nonempty=True, _start=start, _end=None,
-          _start_closed = False, _end_closed=False)';
-    - left closed ray:
-          'TimeInterval(_nonempty=True, _start=None, _end=end,
-          _start_closed = False, _end_closed=True)';
-    - left open ray:
-          'TimeInterval(_nonempty=True, _start=None, _end=end,
-          _start_closed = False, _end_closed=False)';
-    - entire timeline:
-          'TimeInterval(_nonempty=True, _start=None, _end=None,
-          _start_closed = False, _end_closed=False);
-    where 'start' and 'end' are 'datetime.datetime'.
+
+    class Kind(Enum):
+        '''Specifies the mathematical type of the interval.'''
+
+        EMPTY = auto()
+        POINT = auto()
+        OPEN = auto()
+        CLOSED = auto()    # Not a point.
+        CLOSED_OPEN = auto()
+        OPEN_CLOSED = auto()
+        RIGHT_OPEN = auto()
+        RIGHT_CLOSED = auto()
+        LEFT_OPEN = auto()
+        LEFT_CLOSED = auto()
+        TIMELINE = auto()
     
-    If the interval is empty, then '_nonempty' is set to 'False' and all
-    the other fields are set to 'None'. If the interval is not empty,
-    then '_nonempty' is True and all the other fields must define
-    a valid interval. When '_start' is 'None', then '_start_closed'
-    must be 'False' (and similarly for '_end'). Use ready-made
-    constructors to create new intervals.'''
+
+    _BOUNDED_KINDS = {
+        Kind.EMPTY,
+        Kind.POINT,
+        Kind.OPEN,
+        Kind.CLOSED,
+        Kind.CLOSED_OPEN,
+        Kind.OPEN_CLOSED,
+    }
+
+    _LEFT_BOUNDED_KINDS = {
+        Kind.EMPTY,
+        Kind.POINT,
+        Kind.OPEN,
+        Kind.CLOSED,
+        Kind.CLOSED_OPEN,
+        Kind.OPEN_CLOSED,
+        Kind.RIGHT_OPEN,
+        Kind.RIGHT_CLOSED
+    }
+
+    _RIGHT_BOUNDED_KINDS = {
+        Kind.EMPTY,
+        Kind.POINT,
+        Kind.OPEN,
+        Kind.CLOSED,
+        Kind.CLOSED_OPEN,
+        Kind.OPEN_CLOSED,
+        Kind.LEFT_OPEN,
+        Kind.LEFT_CLOSED
+    }
+
+    _OPEN_KINDS = {
+        Kind.EMPTY,
+        Kind.OPEN,
+        Kind.RIGHT_OPEN,
+        Kind.LEFT_OPEN,
+        Kind.TIMELINE
+    }
+
+    # In a mathematical sense, non-openness does not mean closedness.
+    _CLOSED_KINDS = {
+        Kind.EMPTY,
+        Kind.POINT,
+        Kind.CLOSED,
+        Kind.RIGHT_CLOSED,
+        Kind.LEFT_CLOSED,
+        Kind.TIMELINE
+    }
+
+    _START_SPECIFIED_KINDS = {
+        Kind.POINT,
+        Kind.OPEN,
+        Kind.CLOSED,
+        Kind.CLOSED_OPEN,
+        Kind.OPEN_CLOSED,
+        Kind.RIGHT_OPEN,
+        Kind.RIGHT_CLOSED
+    }
+
+    _END_SPECIFIED_KINDS = {
+        Kind.POINT,
+        Kind.OPEN,
+        Kind.CLOSED,
+        Kind.CLOSED_OPEN,
+        Kind.OPEN_CLOSED,
+        Kind.LEFT_OPEN,
+        Kind.LEFT_CLOSED
+    }
+
+    _START_INCLUDED_KINDS = {
+        Kind.POINT,
+        Kind.CLOSED,
+        Kind.CLOSED_OPEN,
+        Kind.RIGHT_CLOSED
+    }
+
+    _END_INCLUDED_KINDS = {
+        Kind.POINT,
+        Kind.CLOSED,
+        Kind.OPEN_CLOSED,
+        Kind.LEFT_CLOSED
+    }
 
 
-    _nonempty: bool = False
+    _kind: Kind = Kind.EMPTY
     _start: Timestamp | None = None
     _end: Timestamp | None = None
-    _start_closed: bool | None = None
-    _end_closed: bool | None = None
 
 
     def _is_valid(self) -> bool:
         '''Checks whether the time interval is set correctly.'''
-        
-        if self._nonempty:
-            # The interval is non-empty.
 
-            # Verifying the correctness of boundary type assignments.
-            if self._start is None:
-                # The start of the interval is not specified, meaning
-                # it is at infinity.
-                if self._start_closed is not False:
-                    # In this case, it is assumed that the boundary
-                    # is open.
-                    return False
-            else:
-                # The start of the interval is explicitly specified
-                # (it does not lie at infinity).
-                if self._start_closed is None:
-                    # In this case, the boundary type must be specified
-                    # as either open or closed. Therefore,
-                    # '_start_closed' cannot be 'None'.
-                    return False
-            
-            if self._end is None:
-                # The end of the interval is not specified, meaning
-                # it is at infinity.
-                if self._end_closed is not False:
-                    # In this case, it is assumed that the boundary
-                    # is open.
-                    return False
-            else:
-                # The end of the interval is explicitly specified
-                # (it does not lie at infinity).
-                if self._end_closed is None:
-                    # In this case, the boundary type must be specified
-                    # as either open or closed. Therefore,
-                    # '_end_closed' cannot be 'None'.
-                    return False
+        match self._kind:
+            case TimeInterval.Kind.EMPTY:
+                return self._start is None and self._end is None
 
-            # Validation of the correctness of the time interval
-            # specification when both boundaries are specified.
-            if self._start is not None and self._end is not None:
-                # The boundaries of the interval are both specified
-                # (not at infinity).
-                if self._start == self._end:
-                    # The start of the interval coincides with its end.
-                    if self._start_closed is False or self._end_closed is False:
-                        # At least one boundary is open. In this case,
-                        # however, the interval is empty, which 
-                        # is inconsistent with the value '_nonempty'.
-                        return False
-                    
-                if self._start > self._end:
-                    # The start of the interval is later than its end.
-                    # In this case, however, the interval is empty,
-                    # which is inconsistent with the value '_nonempty'.
-                    return False
+            case TimeInterval.Kind.POINT:
+                return (
+                    self._start is not None
+                    and self._end is not None
+                    and self._start == self._end
+                )
+
+            case (
+                TimeInterval.Kind.OPEN |
+                TimeInterval.Kind.CLOSED |    # Not a point.
+                TimeInterval.Kind.CLOSED_OPEN |
+                TimeInterval.Kind.OPEN_CLOSED
+            ):
+                return (
+                    self._start is not None
+                    and self._end is not None
+                    and self._start < self._end
+                )
             
-            # Validation of the correctness of the time interval
-            # specification when both boundaries of the interval
-            # are not specified (they are both at infinity).
-            if self._start is None and self._end is None:
-                # The boundaries of the interval are both not specified
-                # (are at infinity).
-                if self._start_closed is not False or self._end_closed is not False:
-                    # At least one boundary is not open. If the interval
-                    # is non-empty and its boundaries are not specified
-                    # (i.e. if they are both at infinity), then
-                    # the interval is supposed to be the entire
-                    # timeline. In this case, it is considered that both
-                    # borders are open.
-                    return False
-        else:
-            # If the interval is empty, all fields except '_nonempty'
-            # must be set to 'None'.
-            if any(x is not None for x in (
-                self._start, self._end, self._start_closed, self._end_closed
-            )):
-                return False
-        return True
+            case TimeInterval.Kind.RIGHT_OPEN | TimeInterval.Kind.RIGHT_CLOSED:
+                return self._start is not None and self._end is None
+            
+            case TimeInterval.Kind.LEFT_OPEN | TimeInterval.Kind.LEFT_CLOSED:
+                return self._start is None and self._end is not None
+
+            case TimeInterval.Kind.TIMELINE:
+                return self._start is None and self._end is None
+
+        return False
+
     
-
     def __post_init__(self) -> None:
         if not self._is_valid():
             raise ValueError('The time interval has been set incorrectly.')
         
-    
+
     def __str__(self) -> str:
-        if self.is_empty:
-            # Returns the empty set symbol.
-            return '\u2205'
-        else:
-            if self.is_point:
+
+        match self._kind:
+            case TimeInterval.Kind.EMPTY:
+                # Returns the empty set symbol. 
+                return '\u2205'
+
+            case TimeInterval.Kind.POINT:
                 return f'{{{self._start}}}'
+
+            case TimeInterval.Kind.OPEN:
+                return f'({self._start}; {self._end})'
+
+            case TimeInterval.Kind.CLOSED:
+                return f'[{self._start}; {self._end}]'
             
-            start_bracket = '[' if self._start_closed is True else '('
-            end_bracket = ']' if self._end_closed is True else ')'
-            start_str = '-\u221E' if self._start is None else str(self._start)
-            end_str = '+\u221E' if self._end is None else str(self._end)
-        
-            return f'{start_bracket}{start_str}; {end_str}{end_bracket}'
+            case TimeInterval.Kind.CLOSED_OPEN:
+                return f'[{self._start}; {self._end})'
+
+            case TimeInterval.Kind.OPEN_CLOSED:
+                return f'({self._start}; {self._end}]'
+            
+            case TimeInterval.Kind.RIGHT_OPEN:
+                return f'({self._start}; +\u221E)'
+
+            case TimeInterval.Kind.RIGHT_CLOSED:
+                return f'[{self._start}; +\u221E)'
+
+            case TimeInterval.Kind.LEFT_OPEN:
+                return f'(-\u221E; {self._end})'
+
+            case TimeInterval.Kind.LEFT_CLOSED:
+                return f'(-\u221E; {self._end}]'
+            
+            case TimeInterval.Kind.TIMELINE:
+                return '(-\u221E; +\u221E)'
+
+        raise AssertionError(f'Unhandled \'TimeInterval.Kind\': {self._kind}.')
+
         
     
     def __bool__(self) -> bool:
         '''Checks whether the interval is non-empty.'''
 
-        return not self.is_empty
+        return self._kind is not TimeInterval.Kind.EMPTY
     
 
     def __len__(self) -> int:
-        '''Returns the number of connected components.'''
+        '''Returns the number of connected components.
+        
+        An empty interval has no connected components, while a non-empty
+        interval has only one connected component.'''
 
-        return int(self._nonempty)
+        return int(self._kind is not TimeInterval.Kind.EMPTY)
     
 
     def __contains__(self, moment: object) -> bool:
@@ -406,119 +448,171 @@ class TimeInterval:
             return False
 
         if self.is_empty:
-            # An empty time interval contains nothing.
             return False
         
+        if self._kind is TimeInterval.Kind.POINT:
+            return moment == self._start
+
+        if self._kind is TimeInterval.Kind.TIMELINE:
+            return True
+        # From this point onwards, the interval is considered to be
+        # non-empty; it is neither a point nor the entire timeline.
+        
+        left_ok = True
+        right_ok = True
+
         if self._start is not None:
-            if self._start_closed:
-                if moment < self._start:
-                    return False
+            if self._kind in {
+                TimeInterval.Kind.OPEN,
+                TimeInterval.Kind.OPEN_CLOSED,
+                TimeInterval.Kind.RIGHT_OPEN
+            }:
+                left_ok = moment > self._start
             else:
-                if moment <= self._start:
-                    return False
+                left_ok = moment >= self._start
 
         if self._end is not None:
-            if self._end_closed:
-                if moment > self._end:
-                    return False
+            if self._kind in {
+                TimeInterval.Kind.OPEN,
+                TimeInterval.Kind.CLOSED_OPEN,
+                TimeInterval.Kind.LEFT_OPEN
+            }:
+                right_ok = moment < self._end
             else:
-                if moment >= self._end:
-                    return False
-
-        return True
+                right_ok = moment <= self._end
+            
+        return left_ok and right_ok
     
 
     def __and__(self, other: TimeInterval) -> TimeInterval:
         '''The intersection of two time intervals.'''
 
+        # Quick checks for empty/timeline.
         if self.is_empty or other.is_empty:
             # An intersection with an empty interval is empty.
             return TimeInterval.empty()
-        
-        # Calculating the start of the intersection. From this point
-        # onwards, intervals are considered to be non-empty.
-        if self._start is not None and other._start is not None:
-            # The start of each interval is explicitly defined (neither
-            # lies at infinity).
+        if self.is_timeline:
+            return other
+        if other.is_timeline:
+            return self
+        # From this point onwards, intervals are considered to be
+        # non-empty and not to be the entire timeline.
+
+        # Calculating the start of the intersection.
+        if self.is_start_specified and other.is_start_specified:
+            # The start of each interval is explicitly specified
+            # (neither lies at infinity).
 
             # Calculating the start of the intersection.
-            new_start = max(self._start, other._start)
+            assert self.start is not None
+            assert other.start is not None
+            new_start = max(self.start, other.start)
 
-            # Calculating the type of start of intersection of intervals
-            # (open or closed).
-            if self._start < other._start:
-                new_start_closed = other._start_closed
-            elif self._start > other._start:
-                new_start_closed = self._start_closed
+            # Calculating whether or not the start is included
+            # in the intersection.
+            assert self.is_start_included is not None
+            assert other.is_start_included is not None
+            if self.start < other.start:
+                new_is_start_included = other.is_start_included
+            elif self.start > other.start:
+                new_is_start_included = self.is_start_included
             else:
-                new_start_closed = self._start_closed and other._start_closed
+                new_is_start_included = self.is_start_included and other.is_start_included
+        elif not self.is_start_specified and not other.is_start_specified:
+            # The start of each interval is not specified (they lie
+            # at infinity).
+            
+            new_start = None
+            new_is_start_included = None
         else:
-            # The start of one of the intervals is not explicitly
-            # specified (it lies at infinity).
+            # Only the start of one of the intervals is specified
+            # (it doesn't lie at infinity).
 
             # Calculating the start of the intersection.
-            new_start = self._start or other._start
+            new_start = self.start or other.start
 
-            # Calculating the type of start of intersection of intervals
-            # (open or closed).
-            new_start_closed = self._start_closed and other._start_closed
-        
+            # Calculating whether or not the start is included
+            # in the intersection.
+            new_is_start_included = (
+                self.is_start_included
+                if self.is_start_specified
+                else other.is_start_included
+            )        
 
         # Calculating the end of the intersection.
-        if self._end is not None and other._end is not None:
-            # The end of each interval is explicitly defined (neither
-            # lies at infinity).
+        if self.is_end_specified and other.is_end_specified:
+            # The end of each interval is explicitly specified
+            # (neither lies at infinity).
 
             # Calculating the end of the intersection.
-            new_end = min(self._end, other._end)
+            assert self.end is not None
+            assert other.end is not None
+            new_end = min(self.end, other.end)
 
-            # Calculating the type of end of intersection of intervals
-            # (open or closed).
-            if self._end < other._end:
-                new_end_closed = self._end_closed
-            elif self._end > other._end:
-                new_end_closed = other._end_closed
+            # Calculating whether or not the end is included
+            # in the intersection.
+            assert self.is_end_included is not None
+            assert other.is_end_included is not None
+            if self.end < other.end:
+                new_is_end_included = self.is_end_included
+            elif self.end > other.end:
+                new_is_end_included = other.is_end_included
             else:
-                new_end_closed = self._end_closed and other._end_closed
+                new_is_end_included = self.is_end_included and other.is_end_included
+        elif not self.is_end_specified and not other.is_end_specified:
+            # The end of each interval is not specified (they lie
+            # at infinity).
+            
+            new_end = None
+            new_is_end_included = None
         else:
-            # The end of one of the intervals is not explicitly
-            # specified (it lies at infinity).
+            # Only the end of one of the intervals is specified
+            # (it doesn't lie at infinity).
 
             # Calculating the end of the intersection.
-            new_end = self._end or other._end
+            new_end = self.end or other.end
 
-            # Calculating the type of end of intersection of intervals
-            # (open or closed).
-            new_end_closed = self._end_closed and other._end_closed
+            # Calculating whether or not the end is included
+            # in the intersection.
+            new_is_end_included = (
+                self.is_end_included
+                if self.is_end_specified
+                else other.is_end_included
+            )  
 
-        # Checking that the resulting intersection is empty.
+        # Checking the resulting intersection for emptiness.
         if new_start is not None and new_end is not None:
-            # The assumed start and end of the intersection
-            # are not at infinity.
-            if new_start_closed and new_end_closed:
+            # The start and end of the intersection are clearly
+            # specified, i.e. they do not lie at infinity.
+            if new_is_start_included is True and new_is_end_included is True:
+                # Both intersection boundaries are included.
                 if new_start > new_end:
                     return TimeInterval.empty()
             else:
+                # At least one intersection boundary is not included.
                 if new_start >= new_end:
                     return TimeInterval.empty()
                 
-        return TimeInterval(True, new_start, new_end, new_start_closed, new_end_closed)
+        return TimeInterval.from_boundaries(
+            start=new_start,
+            end=new_end,
+            start_included=new_is_start_included,
+            end_included=new_is_end_included
+        )
     
 
     @classmethod
     def empty(cls) -> TimeInterval:
         '''Creates empty time interval.'''
 
-        return cls(_nonempty=False, _start=None, _end=None, _start_closed=None, _end_closed=None)
+        return cls(_kind=TimeInterval.Kind.EMPTY, _start=None, _end=None)
 
 
     @classmethod
     def point(cls, moment: Timestamp) -> TimeInterval:
         '''Creates a point. It corresponds to an instantaneous event.'''
 
-        return cls(
-            _nonempty=True, _start=moment, _end=moment, _start_closed=True, _end_closed=True
-        )
+        return cls(_kind=TimeInterval.Kind.POINT, _start=moment, _end=moment)
     
 
     @classmethod
@@ -531,23 +625,21 @@ class TimeInterval:
                 'which is not correct.'
             )
 
-        return cls(
-            _nonempty=True, _start=start, _end=end, _start_closed=False, _end_closed=False
-        )
+        return cls(_kind=TimeInterval.Kind.OPEN, _start=start, _end=end)
     
 
     @classmethod
     def closed(cls, start: Timestamp, end: Timestamp) -> TimeInterval:
-        '''Creates an non-empty closed bounded time interval.'''
+        '''Creates an non-empty closed bounded time interval.
+        Not a point.'''
 
-        if start > end:
+        if start >= end:
             raise ValueError(
-                'The start of the interval occurs after its end, which is incorrect.'
+                'Either the start of the interval occurs after its end, which is incorrect, '
+                'or it\'s a point.'
             )
 
-        return cls(
-            _nonempty=True, _start=start, _end=end, _start_closed=True, _end_closed=True
-        )
+        return cls(_kind=TimeInterval.Kind.CLOSED, _start=start, _end=end)
     
 
     @classmethod
@@ -560,9 +652,7 @@ class TimeInterval:
                 'which is not correct.'
             )
 
-        return cls(
-            _nonempty=True, _start=start, _end=end, _start_closed=True, _end_closed=False
-        )
+        return cls(_kind=TimeInterval.Kind.CLOSED_OPEN, _start=start, _end=end)
     
 
     @classmethod
@@ -575,67 +665,192 @@ class TimeInterval:
                 'which is not correct.'
             )
 
-        return cls(
-            _nonempty=True, _start=start, _end=end, _start_closed=False, _end_closed=True
-        )
+        return cls(_kind=TimeInterval.Kind.OPEN_CLOSED, _start=start, _end=end)
     
 
     @classmethod
     def rightclosed(cls, start: Timestamp) -> TimeInterval:
-        '''Creates a closed right ray.'''
+        '''Creates a closed right-ray.'''
 
-        return cls(
-            _nonempty=True, _start=start, _end=None, _start_closed = True, _end_closed=False
-        )
+        return cls(_kind=TimeInterval.Kind.RIGHT_CLOSED, _start=start)
     
 
     @classmethod
     def rightopen(cls, start: Timestamp) -> TimeInterval:
-        '''Creates an open right ray.'''
+        '''Creates an open right-ray.'''
 
-        return cls(
-            _nonempty=True, _start=start, _end=None, _start_closed = False, _end_closed=False
-        )
+        return cls(_kind=TimeInterval.Kind.RIGHT_OPEN, _start=start)
     
+
     @classmethod
     def leftclosed(cls, end: Timestamp) -> TimeInterval:
         '''Creates a closed left ray.'''
 
-        return cls(
-            _nonempty=True, _start=None, _end=end, _start_closed = False, _end_closed=True
-        )
+        return cls(_kind=TimeInterval.Kind.LEFT_CLOSED, _end=end)
     
 
     @classmethod
     def leftopen(cls, end: Timestamp) -> TimeInterval:
         '''Creates an open left ray.'''
 
-        return cls(
-            _nonempty=True, _start=None, _end=end, _start_closed = False, _end_closed=False
-        )
+        return cls(_kind=TimeInterval.Kind.LEFT_OPEN, _end=end)
     
 
     @classmethod
     def timeline(cls) -> TimeInterval:
         '''Creates the entire timeline.'''
 
-        return cls(
-            _nonempty=True, _start=None, _end=None, _start_closed = False, _end_closed=False
-        )
+        return cls(_kind=TimeInterval.Kind.TIMELINE)
+    
+
+    @classmethod
+    def from_boundaries(
+        cls,
+        start: Timestamp | None, end: Timestamp | None,
+        start_included: bool | None, end_included: bool | None
+    ) -> TimeInterval:
+        '''Creates a time interval by its boundaries.
+        
+        If both boundaries are not specified, the interval is considered
+        to be empty. It is not possible to set the entire timeline
+        in this way. Use the 'timeline' constructor for this purpose.'''
+        
+        if start is not None and end is not None:
+            # Both boundaries of the interval are specified. This is
+            # a (non-empty) bounded interval.
+
+            if start_included is None or end_included is None:
+                raise ValueError(
+                    'The interval is set incorrectly. If the boundaries are specified, they'
+                    'must be included or excluded. The values \'start_included\' '
+                    'and \'end_included\' must be \'True\' or \'False\'.'
+                )
+
+            if start_included and end_included:
+                # Both the start and end of the interval are included.
+                # This is a closed (non-empty, bounded) interval. This
+                # may be the point.
+
+                if start > end:
+                    raise ValueError(
+                        'The interval is set incorrectly. The start of the interval cannot occur '
+                        'later than the end.'
+                    )
+                
+                if start == end:
+                    # The interval is a point.
+                    return TimeInterval.point(start)
+                
+                return TimeInterval.closed(start, end)
+            
+            elif start_included and not end_included:
+                # The start of the interval is included, but the end
+                # is not. This is a closed-open (non-empty, bounded)
+                # interval.
+
+                if start >= end:
+                    raise ValueError(
+                        'The interval is set incorrectly. The start of the closed-open interval '
+                        'cannot occur after the end, or coincide with it.'
+                    )
+
+                return TimeInterval.closedopen(start, end)
+            
+            elif not start_included and end_included:
+                # The start of the interval is not included, but the end
+                # is included. This is an open-closed (non-empty,
+                # bounded) interval.
+
+                if start >= end:
+                    raise ValueError(
+                        'The interval is set incorrectly. The start of the open-closed interval '
+                        'cannot occur after the end, or coincide with it.'
+                    )
+
+                return TimeInterval.openclosed(start, end)
+            
+            else:
+                # Both the start and end of the interval
+                # are not included. This is an open (non-empty, bounded)
+                # interval.
+
+                if start >= end:
+                    raise ValueError(
+                        'The interval is set incorrectly. The start of the open interval cannot '
+                        'occur after the end, or coincide with it.'
+                    )
+
+                return TimeInterval.open(start, end)
+                
+        elif start is not None and end is None:
+            # The start of the interval is specified, but not the end.
+            # This is the right-ray.
+
+            if end_included is not None:
+                raise ValueError(
+                    'The interval is set incorrectly. If the end is not specified, it cannot be '
+                    'included or excluded. The value \'end_included\' must be \'None\'.'
+                )
+            
+            if start_included:
+                # The start of the interval is included. This is a right
+                # closed ray.
+
+                return TimeInterval.rightclosed(start)
+            else:
+                # The start of the interval is not included. This is
+                # a right open ray.
+                
+                return TimeInterval.rightopen(start)
+            
+        elif start is None and end is not None:
+            # The start of the interval is not specified, but
+            # its end is. This is the left ray.
+
+            if start_included is not None:
+                raise ValueError(
+                    'The interval is set incorrectly. If the start is not specified, it cannot be '
+                    'included or excluded. The value \'start_included\' must be \'None\'.'
+                )
+            
+            if end_included:
+                # The end of the interval is included. This is a left
+                # closed ray.
+
+                return TimeInterval.leftclosed(end)
+            else:
+                # The end of the interval is not included. This is
+                # a left open ray.
+                
+                return TimeInterval.leftopen(end)
+            
+        else:
+            # The start and end of the interval are not specified.
+
+            if start_included is not None or end_included is not None:
+                raise ValueError(
+                    'The interval is set incorrectly. If the boundaries are not specified, they '
+                    'cannot be included or excluded. The values \'start_included\' '
+                    'and \'end_included\' must be \'None\'.'
+                )
+            
+            # If both boundaries are not specified, the interval
+            # is considered to be empty.
+            return TimeInterval.empty()
 
 
     @property
     def is_nonempty(self) -> bool:
         '''Checks whether the time interval is non-empty.'''
 
-        return self._nonempty
+        return not self._kind is TimeInterval.Kind.EMPTY
 
 
     @property
     def is_empty(self) -> bool:
         '''Checks whether the time interval is empty.'''
 
-        return not self._nonempty
+        return self._kind is TimeInterval.Kind.EMPTY
     
 
     @property
@@ -643,13 +858,24 @@ class TimeInterval:
         '''Checks whether the interval is bounded.
         
         Here, boundedness is understood in a mathematical sense.
-        Therefore an empty interval is considered bounded.'''
+        Therefore an empty interval is considered to be bounded.'''
 
-        return not self._nonempty or (
-            self._start is not None
-            and self._end is not None
-        )
+        return self._kind in TimeInterval._BOUNDED_KINDS
     
+
+    @property
+    def is_left_bounded(self) -> bool:
+        '''Checks whether the interval is bounded on the left.'''
+
+        return self._kind in TimeInterval._LEFT_BOUNDED_KINDS
+    
+
+    @property
+    def is_right_bounded(self) -> bool:
+        '''Checks whether the interval is bounded on the right.'''
+
+        return self._kind in TimeInterval._RIGHT_BOUNDED_KINDS
+
 
     @property
     def is_connected(self) -> bool:
@@ -662,14 +888,14 @@ class TimeInterval:
     def is_point(self) -> bool:
         '''Checks whether the time interval is a point.'''
 
-        return (
-            self._nonempty
-            and self._start is not None
-            and self._end is not None
-            and self._start == self._end
-            and self._start_closed is True
-            and self._end_closed is True
-        )
+        return self._kind is TimeInterval.Kind.POINT
+    
+
+    @property
+    def is_timeline(self) -> bool:
+        '''Checks whether the time interval is the entire timeline.'''
+
+        return self._kind is TimeInterval.Kind.TIMELINE
     
 
     @property
@@ -680,46 +906,19 @@ class TimeInterval:
         an empty interval, a bounded open interval, an open ray
         and the entire timeline are all considered to be open sets.'''
 
-        return not self._nonempty or (
-            self._start_closed is False
-            and self._end_closed is False
-        )
+        return self._kind in TimeInterval._OPEN_KINDS
     
 
     @property
     def is_closed(self) -> bool:
-        '''Checks whether the time interval is closes.
+        '''Checks whether the time interval is closed.
 
         Here, closeness is understood in a mathematical sense.
         Therefore, an empty interval, a bounded closed interval,
         a closed ray and the entire timeline are all considered
         to be closed sets.'''
 
-        return not self._nonempty or (
-            # A non-empty closed interval (including a point).
-            self._start is not None
-            and self._end is not None
-            and self._start_closed is True
-            and self._end_closed is True
-        ) or (
-            # The entire timeline.
-            self._start is None
-            and self._end is None
-            and self._start_closed is False
-            and self._end_closed is False
-        ) or (
-            # A right closed ray.
-            self._start is not None
-            and self._end is None
-            and self._start_closed is True
-            and self._end_closed is False
-        ) or (
-            # A left closed ray.
-            self._start is None
-            and self._end is not None
-            and self._start_closed is False
-            and self._end_closed is True
-        )
+        return self._kind in TimeInterval._CLOSED_KINDS
     
 
     @property
@@ -732,12 +931,50 @@ class TimeInterval:
     
 
     @property
+    def is_start_specified(self) -> bool:
+        '''Returns whether the start of the interval is specified.'''
+
+        return self._kind in TimeInterval._START_SPECIFIED_KINDS
+
+
+    @property
+    def is_start_included(self) -> bool | None:
+        '''If the start of the interval is specified, returns whether
+        it is included in the interval or not. If the start
+        is not specified, it returns 'None'.'''
+
+        if self._kind in TimeInterval._START_SPECIFIED_KINDS:
+            return self._kind in TimeInterval._START_INCLUDED_KINDS
+        else:
+            return None
+    
+
+    @property
     def end(self) -> Timestamp | None:
         '''Returns the end of the time interval. If it is not defined,
         when the interval is empty or unbounded
         on the right, returns 'None'.'''
 
         return self._end
+    
+
+    @property
+    def is_end_specified(self) -> bool:
+        '''Returns whether the end of the interval is specified.'''
+
+        return self._kind in TimeInterval._END_SPECIFIED_KINDS
+    
+
+    @property
+    def is_end_included(self) -> bool | None:
+        '''If the end of the interval is specified, returns whether
+        it is included in the interval or not. If the end
+        is not specified, it returns 'None'.'''
+
+        if self._kind in TimeInterval._END_SPECIFIED_KINDS:
+            return self._kind in TimeInterval._END_INCLUDED_KINDS
+        else:
+            return None
 
 
     @property
@@ -791,51 +1028,58 @@ class TimeInterval:
         # Any contains an empty interval.
         if other.is_empty:
             return True
+        # From this point onwards, we will consider 'other' to be
+        # non-empty. An empty interval cannot contain a non-empty one.
 
-        # From this point onwards, we will consider 'other'
-        # to be non-empty. An empty interval cannot contain a non-empty
-        # one.
         if self.is_empty:
             return False
 
         # Checking the left boundary.
-        if other._start is not None:
-            if self._start is None:
+        if other.start is not None:
+            # 'other' is bounded on the left.
+            if self.start is None:
+                # 'self' is unbounded on the left.
                 left_ok = True
             else:
-                if self._start < other._start:
+                # 'self' is bounded on the left.
+
+                if self.start < other.start:
                     left_ok = True
-                elif self._start == other._start:
+                elif self.start == other.start:
                     left_ok = (
-                        self._start_closed is True
-                        or other._start_closed is False
+                        self.is_start_included is True
+                        or other.is_start_included is False
                     )
                 else:
                     left_ok = False
         else:
-            # The start of 'other' lies in infinity.
-            left_ok = self._start is None
+            # 'other' is unbounded on the left.
+            left_ok = self.start is None
 
         if not left_ok:
             return False
 
         # Checking the right boundary.
-        if other._end is not None:
-            if self._end is None:
+        if other.end is not None:
+            # 'other' is bounded on the right.
+            if self.end is None:
+                # 'self' is unbounded on the right.
                 right_ok = True
             else:
-                if self._end > other._end:
+                # 'self' is bounded on the right.
+
+                if self.end > other.end:
                     right_ok = True
-                elif self._end == other._end:
+                elif self.end == other.end:
                     right_ok = (
-                        self._end_closed is True
-                        or other._end_closed is False
+                        self.is_end_included is True
+                        or other.is_end_included is False
                     )
                 else:
                     right_ok = False
         else:
-            # The end of 'other' lies in infinity.
-            right_ok = self._end is None
+            # 'other' is unbounded on the right.
+            right_ok = self.end is None
 
         return right_ok
     
@@ -858,11 +1102,14 @@ class TimeInterval:
         # From this point onwards, both intervals are considered
         # to be non-empty.
 
-        if self._end is not None and other._start is not None:
-            if self._end < other._start:
+        if self.end is not None and other.start is not None:
+            # 'self' is bounded on the right and 'other' is bounded
+            # on the left.
+
+            if self.end < other.start:
                 return True
-            if self._end == other._start:
-                return self._end_closed is False or other._start_closed is False
+            if self.end == other.start:
+                return self.is_end_included is False or other.is_start_included is False
             
         return False
     
@@ -879,11 +1126,14 @@ class TimeInterval:
         # From this point onwards, both intervals are considered
         # to be non-empty.
 
-        if other._end is not None and self._start is not None:
-            if other._end < self._start:
+        if other.end is not None and self.start is not None:
+            # 'other' is bounded on the right and 'self' is bounded
+            # on the left.
+
+            if other.end < self.start:
                 return True
-            if other._end == self._start:
-                return other._end_closed is False or self._start_closed is False
+            if other.end == self.start:
+                return other.is_end_included is False or self.is_start_included is False
             
         return False
     
@@ -894,20 +1144,16 @@ class TimeInterval:
         
         if self.is_empty or other.is_empty:
             return False
+        # From this point onwards, both intervals are considered
+        # to be non-empty.
 
-        # 'self' is completely to the left of 'other'.
-        if self._end is not None and other._start is not None:
-            if self._end < other._start:
-                return False
-            if self._end == other._start:
-                return self._end_closed is True and other._start_closed is True
+        # Check whether 'self' is completely to the left of 'other'.
+        if self.is_left_of(other):
+            return False
 
-        # 'other' is completely to the left of 'self'.
-        if other._end is not None and self._start is not None:
-            if other._end < self._start:
-                return False
-            if other._end == self._start:
-                return other._end_closed is True and self._start_closed is True
+        # Check whether 'other' is completely to the left of 'self'.
+        if other.is_left_of(self):
+            return False
 
         return True
     
@@ -917,7 +1163,7 @@ class TimeInterval:
         of the other one, does not intersect with it and their union
         will be a disconnected set.
         
-        This is not true if at least one of the intervals is non-empty,
+        This is not true if at least one of the intervals is empty,
         because a disconnected union is required.'''
 
         if self.is_empty or other.is_empty:
@@ -925,11 +1171,14 @@ class TimeInterval:
         # From this point onwards, both intervals are considered
         # to be non-empty.
         
-        if self._end is not None and other._start is not None:
-            if self._end < other._start:
+        if self.end is not None and other.start is not None:
+            # 'self' is bounded on the right and 'other' is bounded
+            # on the left.
+
+            if self.end < other.start:
                 return True
-            if self._end == other._start:
-                return self._end_closed is False and other._start_closed is False
+            if self.end == other.start:
+                return self.is_end_included is False and other.is_start_included is False
             
         return False
     
@@ -939,7 +1188,7 @@ class TimeInterval:
         of the other one, does not intersect with it and their union
         will be a disconnected set.
         
-        This is not true if at least one of the intervals is non-empty,
+        This is not true if at least one of the intervals is empty,
         because a disconnected union is required.'''
 
         if self.is_empty or other.is_empty:
@@ -947,15 +1196,18 @@ class TimeInterval:
         # From this point onwards, both intervals are considered
         # to be non-empty.
         
-        if other._end is not None and self._start is not None:
-            if other._end < self._start:
+        if other.end is not None and self.start is not None:
+            # 'other' is bounded on the right and 'self' is bounded
+            # on the left.
+
+            if other.end < self.start:
                 return True
-            if other._end == self._start:
-                return other._end_closed is False and self._start_closed is False
+            if other.end == self.start:
+                return other.is_end_included is False and self.is_start_included is False
             
         return False
-        
-    
+
+
 
 @dataclass(frozen=True)
 class TimeSet:
@@ -980,13 +1232,14 @@ class TimeSet:
             if not l.is_left_of_disconnectedly(r):
                 return False
         
-        return True
+        return NotImplemented
     
 
     def __init__(self, *intervals: TimeInterval | tuple[TimeInterval]):
         if len(intervals) == 1 and isinstance(intervals[0], tuple):
             intervals = intervals[0]
-        object.__setattr__(self, "_intervals", tuple(intervals))
+        object.__setattr__(self, '_intervals', tuple(intervals))
+
         if not self._is_valid():
             raise ValueError('The \'TimeSet\' has been set incorrectly.')
     
@@ -1008,6 +1261,16 @@ class TimeSet:
         '''Returns the number of connected components.'''
 
         return len(self._intervals)
+    
+
+    @classmethod
+    def union(cls, *intervals: TimeInterval) -> TimeSet:
+        '''Creates a 'TimeSet' as a union of 'TimeInterval' time
+        intervals.'''
+
+        # TODO
+
+        return NotImplemented
     
 
     @property
