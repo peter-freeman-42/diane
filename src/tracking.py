@@ -187,7 +187,7 @@ class Timestamp:
 
     @property
     def timezone_iana(self) -> str:
-        '''Returns the local time zone in IANA format.'''
+        '''Returns the time zone of this timestamp in IANA format.'''
 
         if not isinstance(self._dt.tzinfo, zoneinfo.ZoneInfo):
             raise ValueError('The time zone has been set incorrectly.')
@@ -617,7 +617,7 @@ class TimeInterval:
 
     @classmethod
     def open(cls, start: Timestamp, end: Timestamp) -> TimeInterval:
-        '''Creates an non-empty open bounded time interval.'''
+        '''Creates a non-empty open bounded time interval.'''
 
         if start >= end:
             raise ValueError(
@@ -630,7 +630,7 @@ class TimeInterval:
 
     @classmethod
     def closed(cls, start: Timestamp, end: Timestamp) -> TimeInterval:
-        '''Creates an non-empty closed bounded time interval.
+        '''Creates a non-empty closed bounded time interval.
         Not a point.'''
 
         if start >= end:
@@ -837,6 +837,70 @@ class TimeInterval:
             # If both boundaries are not specified, the interval
             # is considered to be empty.
             return TimeInterval.empty()
+    
+
+    @classmethod
+    def minimal_cover(cls, *intervals: TimeInterval) -> TimeInterval:
+        '''Creates the smallest interval containing the given ones.
+        
+        This is not a cover in the strict topological sense because
+        it creates a single interval rather than a union.'''
+
+        # Remove empty intervals.
+        nonempty_intervals = [i for i in intervals if not i.is_empty]
+
+        # If there are no non-empty intervals, then the cover is empty.
+        if not nonempty_intervals:
+            return cls.empty()
+
+        # Find the left boundary, i.e. minimal start. ('None'
+        # is considered the smallest because it denotes a boundary that
+        # lies at infinity.)
+        def start_key(i: TimeInterval):
+            return (i.start is not None, i.start)
+
+        leftmost = min(nonempty_intervals, key=start_key)
+
+        start = leftmost.start
+
+        # The start is included if it is included in at least one
+        # of the intervals.
+        start_included = (
+            None if start is None
+            else any(
+                i.start == start and i.is_start_included
+                for i in nonempty_intervals
+            )
+        )
+
+        # Find the right boundary, i.e. maximal end. ('None'
+        # is considered the largest because it denotes a boundary that
+        # lies at infinity.)
+        def end_key(i: TimeInterval):
+            return (i.end is None, i.end)
+
+        rightmost = max(nonempty_intervals, key=end_key)
+
+        end = rightmost.end
+
+        # The end is included if it is included in at least one
+        # of the intervals.
+        end_included = (
+            None if end is None
+            else any(
+                i.end == end and i.is_end_included
+                for i in nonempty_intervals
+            )
+        )
+
+        # Construct the covering interval.
+        return cls.from_boundaries(
+            start=start,
+            end=end,
+            start_included=start_included,
+            end_included=end_included
+        )
+
 
 
     @property
@@ -1138,26 +1202,6 @@ class TimeInterval:
         return False
     
 
-    def overlaps(self, other: TimeInterval) -> bool:
-        '''Check if two intervals overlap (have non-empty
-        intersection).'''
-        
-        if self.is_empty or other.is_empty:
-            return False
-        # From this point onwards, both intervals are considered
-        # to be non-empty.
-
-        # Check whether 'self' is completely to the left of 'other'.
-        if self.is_left_of(other):
-            return False
-
-        # Check whether 'other' is completely to the left of 'self'.
-        if other.is_left_of(self):
-            return False
-
-        return True
-    
-
     def is_left_of_disconnectedly(self, other: TimeInterval) -> bool:
         '''Checks that the interval lies strictly to the left
         of the other one, does not intersect with it and their union
@@ -1206,6 +1250,50 @@ class TimeInterval:
                 return other.is_end_included is False and self.is_start_included is False
             
         return False
+    
+
+    def overlaps(self, other: TimeInterval) -> bool:
+        '''Check if two intervals overlap (have non-empty
+        intersection).'''
+        
+        if self.is_empty or other.is_empty:
+            return False
+        # From this point onwards, both intervals are considered
+        # to be non-empty.
+
+        # Check whether 'self' is completely to the left of 'other'.
+        if self.is_left_of(other):
+            return False
+
+        # Check whether 'other' is completely to the left of 'self'.
+        if other.is_left_of(self):
+            return False
+
+        return True
+    
+
+    def touches(self, other: TimeInterval) -> bool:
+        '''Checks whether the intervals touch each other.
+        
+        In other words, it checks whether they are non-empty and whether
+        their union is connected.'''
+
+        if self.is_empty or other.is_empty:
+            return False
+        # From this point onwards, both intervals are considered
+        # to be non-empty.
+
+        # Check whether 'self' is completely to the left of 'other'
+        # and their union is disconnected.
+        if self.is_left_of_disconnectedly(other):
+            return False
+
+        # Check whether 'other' is completely to the left of 'self'
+        # and their union is disconnected.
+        if other.is_left_of_disconnectedly(self):
+            return False
+
+        return True
 
 
 
@@ -1224,20 +1312,21 @@ class TimeSet:
     def _is_valid(self) -> bool:
         '''Checks whether the 'TimeSet' is set correctly.'''
 
+        # 'TimeSet' must not contain any empty intervals.
         for i in self._intervals:
             if i.is_empty:
                 return False
 
+        # The intervals in 'TimeSet' must be chronologically ordered,
+        # and all their pairwise unions must be disconnected.
         for l, r in zip(self._intervals, self._intervals[1:]):
             if not l.is_left_of_disconnectedly(r):
                 return False
         
-        return NotImplemented
+        return True
     
 
-    def __init__(self, *intervals: TimeInterval | tuple[TimeInterval]):
-        if len(intervals) == 1 and isinstance(intervals[0], tuple):
-            intervals = intervals[0]
+    def __init__(self, *intervals: TimeInterval):
         object.__setattr__(self, '_intervals', tuple(intervals))
 
         if not self._is_valid():
@@ -1245,10 +1334,11 @@ class TimeSet:
     
 
     def __str__(self) -> str:
-        if not self._intervals:
+        if self.is_empty:
             # Returns the empty set symbol.
             return '\u2205'
-        return ' \u2294\n'.join(map(str, self._intervals))
+        else:
+            return ' \u2294\n'.join(map(str, self._intervals))
     
 
     def __bool__(self) -> bool:
@@ -1268,9 +1358,46 @@ class TimeSet:
         '''Creates a 'TimeSet' as a union of 'TimeInterval' time
         intervals.'''
 
-        # TODO
+        # Remove empty intervals.
+        nonempty_intervals = [i for i in intervals if not i.is_empty]
 
-        return NotImplemented
+        # If there are no non-empty intervals, then the union is empty.
+        if not nonempty_intervals:
+            return cls()
+
+        # Sort intervals chronologically (by their starts).
+        def start_key(i: TimeInterval):
+            return (i.start is not None, i.start)
+
+        nonempty_intervals.sort(key=start_key)
+
+        # Group touching intervals.
+        components: list[list[TimeInterval]] = []
+        current_group = [nonempty_intervals[0]]
+
+        for interval in nonempty_intervals[1:]:
+            if current_group[-1].touches(interval):
+                # If the new interval touches the last interval
+                # in the group, add it to the group.
+                current_group.append(interval)
+            else:
+                # If the new interval does not touch the last interval
+                # in the group, we keep the previous group and create
+                # a new one that includes the new interval.
+                components.append(current_group)
+                current_group = [interval]
+
+        # Keep the last group.
+        components.append(current_group)
+
+        # Build minimal covers (connected components).
+        merged_intervals = [
+            TimeInterval.minimal_cover(*group)
+            for group in components
+        ]
+
+        # Construct 'TimeSet'.
+        return cls(*merged_intervals)
     
 
     @property
@@ -1338,7 +1465,7 @@ class TimeSet:
 
         if self.is_empty:
             return True
-        # From this point onwards, the set is considered
-        # to be non-empty.
+        # From this point onwards, the set is considered to be
+        # non-empty.
 
         return all(i.is_closed for i in self._intervals)
