@@ -399,6 +399,7 @@ class TimeInterval:
 
     
     def __post_init__(self) -> None:
+
         if not self._is_valid():
             raise ValueError('The time interval has been set incorrectly.')
         
@@ -629,8 +630,9 @@ class TimeInterval:
 
     @classmethod
     def closed(cls, start: Timestamp, end: Timestamp) -> TimeInterval:
-        '''Creates a non-empty closed bounded time interval.
-        Not a point.'''
+        '''Creates a non-empty closed bounded time interval, not a point.
+        
+        To create a point use the 'point' constructor.'''
 
         if start >= end:
             raise ValueError(
@@ -922,8 +924,7 @@ class TimeInterval:
         )
     
 
-    @classmethod
-    def to_the_right(cls, interval: TimeInterval) -> TimeInterval:
+    def to_the_right(self) -> TimeInterval:
         '''Creates a new interval from the space to the right
         of the interval.
         
@@ -931,21 +932,20 @@ class TimeInterval:
         of the interval. Empty interval is allowed. If an empty interval
         is given, the entire timeline is returned.'''
 
-        if interval.is_empty:
+        if self.is_empty:
             return TimeInterval.timeline()
         # From this point onwards, the interval is considered
         # to be non-empty.
 
-        if interval.end is None:
+        if self.end is None:
             # The interval is unbounded on the right.
             return TimeInterval.empty()
         else:
             # The interval is bounded on the right.
-            return TimeInterval.right_ray(interval.end, not interval.is_end_included)
+            return TimeInterval.right_ray(self.end, not self.is_end_included)
     
 
-    @classmethod
-    def to_the_left(cls, interval: TimeInterval) -> TimeInterval:
+    def to_the_left(self) -> TimeInterval:
         '''Creates a new interval from the space to the left
         of the interval.
         
@@ -953,17 +953,17 @@ class TimeInterval:
         of the interval. Empty interval is allowed. If an empty interval
         is given, the entire timeline is returned.'''
 
-        if interval.is_empty:
+        if self.is_empty:
             return TimeInterval.timeline()
         # From this point onwards, the interval is considered
         # to be non-empty.
 
-        if interval.start is None:
+        if self.start is None:
             # The interval is unbounded on the left.
             return TimeInterval.empty()
         else:
             # The interval is bounded on the left.
-            return TimeInterval.left_ray(interval.start, not interval.is_start_included)
+            return TimeInterval.left_ray(self.start, not self.is_start_included)
     
 
     @classmethod
@@ -983,9 +983,9 @@ class TimeInterval:
         if first.is_empty and second.is_empty:
             return TimeInterval.timeline()
         elif first.is_nonempty and second.is_empty:
-            return TimeInterval.to_the_right(first)
+            return first.to_the_right()
         elif first.is_empty and second.is_nonempty:
-            return TimeInterval.to_the_left(second)
+            return second.to_the_left()
         else:
             # Both intervals are non-empty.
 
@@ -1014,40 +1014,38 @@ class TimeInterval:
                     )
     
 
-    @classmethod
-    def closure(cls, interval: TimeInterval) -> TimeInterval:
-        '''Creates a topological closure of a given interval.'''
+    def closure(self) -> TimeInterval:
+        '''Creates a topological closure of the interval.'''
 
-        match interval._kind:
+        match self._kind:
             case (
                 TimeInterval.Kind.OPEN |
                 TimeInterval.Kind.CLOSED_OPEN |
                 TimeInterval.Kind.OPEN_CLOSED
             ):
-                return cls(
+                return TimeInterval(
                     _kind=TimeInterval.Kind.CLOSED,
-                    _start=interval.start,
-                    _end=interval.end
+                    _start=self.start,
+                    _end=self.end
                 )
             case TimeInterval.Kind.RIGHT_OPEN:
-                return cls(
+                return TimeInterval(
                     _kind=TimeInterval.Kind.RIGHT_CLOSED,
-                    _start=interval.start
+                    _start=self.start
                 )
             case TimeInterval.Kind.LEFT_OPEN:
-                return cls(
+                return TimeInterval(
                     _kind=TimeInterval.Kind.LEFT_CLOSED,
-                    _end=interval.end
+                    _end=self.end
                 )
             case _:
-                return interval
+                return self
     
 
-    @classmethod
-    def interior(cls, interval: TimeInterval) -> TimeInterval:
+    def interior(self) -> TimeInterval:
         '''Creates a topological interior of a given interval.'''
 
-        match interval._kind:
+        match self._kind:
             case TimeInterval.Kind.POINT:
                 return TimeInterval.empty()
             case (
@@ -1055,23 +1053,23 @@ class TimeInterval:
                 TimeInterval.Kind.CLOSED_OPEN |
                 TimeInterval.Kind.OPEN_CLOSED
             ):
-                return cls(
+                return TimeInterval(
                     _kind=TimeInterval.Kind.OPEN,
-                    _start=interval.start,
-                    _end=interval.end
+                    _start=self.start,
+                    _end=self.end
                 )
             case TimeInterval.Kind.RIGHT_CLOSED:
-                return cls(
+                return TimeInterval(
                     _kind=TimeInterval.Kind.RIGHT_OPEN,
-                    _start=interval.start
+                    _start=self.start
                 )
             case TimeInterval.Kind.LEFT_CLOSED:
-                return cls(
+                return TimeInterval(
                     _kind=TimeInterval.Kind.LEFT_OPEN,
-                    _end=interval.end
+                    _end=self.end
                 )
             case _:
-                return interval
+                return self
 
 
     @property
@@ -1110,13 +1108,6 @@ class TimeInterval:
         '''Checks whether the interval is bounded on the right.'''
 
         return self._kind in TimeInterval._RIGHT_BOUNDED_KINDS
-
-
-    @property
-    def is_connected(self) -> bool:
-        '''Any interval is connected.'''
-
-        return True
     
 
     @property
@@ -1156,29 +1147,36 @@ class TimeInterval:
         return self._kind in TimeInterval._CLOSED_KINDS
     
 
-    def components_number(self) -> int:
-        '''Returns the number of connected components.
-        
-        An empty interval has no connected components, while a non-empty
-        interval has only one connected component.'''
-
-        return int(self._kind is not TimeInterval.Kind.EMPTY)
-    
-
     @property
     def start(self) -> Timestamp | None:
         '''Returns the start of the time interval. If it is not defined,
-        when the interval is empty or unbounded
-        on the left, returns 'None'.'''
+        when the interval is empty or unbounded on the left, returns
+        'None'.'''
 
         return self._start
     
+
+    @property
+    def end(self) -> Timestamp | None:
+        '''Returns the end of the time interval. If it is not defined,
+        when the interval is empty or unbounded
+        on the right, returns 'None'.'''
+
+        return self._end
+
 
     @property
     def is_start_specified(self) -> bool:
         '''Returns whether the start of the interval is specified.'''
 
         return self._kind in TimeInterval._START_SPECIFIED_KINDS
+
+
+    @property
+    def is_end_specified(self) -> bool:
+        '''Returns whether the end of the interval is specified.'''
+
+        return self._kind in TimeInterval._END_SPECIFIED_KINDS
 
 
     @property
@@ -1191,22 +1189,6 @@ class TimeInterval:
             return self._kind in TimeInterval._START_INCLUDED_KINDS
         else:
             return None
-    
-
-    @property
-    def end(self) -> Timestamp | None:
-        '''Returns the end of the time interval. If it is not defined,
-        when the interval is empty or unbounded
-        on the right, returns 'None'.'''
-
-        return self._end
-    
-
-    @property
-    def is_end_specified(self) -> bool:
-        '''Returns whether the end of the interval is specified.'''
-
-        return self._kind in TimeInterval._END_SPECIFIED_KINDS
     
 
     @property
@@ -1518,7 +1500,7 @@ class TimeSet:
             # Returns the empty set symbol.
             return '\u2205'
         else:
-            return ' \u2294\n'.join(map(str, self._intervals))
+            return ' \u2294 '.join(map(str, self._intervals))
     
 
     def __bool__(self) -> bool:
@@ -1551,6 +1533,17 @@ class TimeSet:
             return self.intersection_with_timeset(other)
         
         return NotImplemented
+    
+
+    def __sub__(self, other: TimeInterval | TimeSet):
+        '''The deffirence of two time sets, or a time set with a time
+        interval.'''
+
+        if isinstance(other, TimeInterval):
+            other = TimeSet(other)
+
+        return self & other.complement()
+
     
 
     def intersection_with_interval(self, other: TimeInterval) -> TimeSet:
@@ -1628,12 +1621,12 @@ class TimeSet:
 
         new_components: list[TimeInterval] = []
 
-        new_components.append(TimeInterval.to_the_left(self.first_component))
+        new_components.append(self.first_component.to_the_left())
 
         for f, s in zip(self._intervals, self._intervals[1:]):
             new_components.append(TimeInterval.between(f, s))
 
-        new_components.append(TimeInterval.to_the_right(self.last_component))
+        new_components.append(self.last_component.to_the_right())
 
         return TimeSet.union(*new_components)
 
@@ -1815,3 +1808,35 @@ class TimeSet:
             return self._intervals[-1]
         except IndexError as e:
             raise IndexError('Time set has no connected components.') from e
+        
+
+    def duration(self) -> datetime.timedelta | None:
+        '''Determines the duration of the time set.
+
+        If the duration is not defined (in the case of an unbounded time
+        set), returns 'None'. The duration of an empty time set
+        is zero.'''
+
+        if not self.is_bounded:
+            return None
+
+        total = datetime.timedelta()
+
+        for c in self.components:
+            d = c.duration
+            assert d is not None
+            total += d
+
+        return total
+    
+
+    def closure(self) -> TimeSet:
+        '''Creates a topological closure of the time set.'''
+
+        return TimeSet.union(*map(TimeInterval.closure, self.components))
+    
+
+    def interior(self) -> TimeSet:
+        '''Creates a topological interior of the time set.'''
+
+        return TimeSet.union(*map(TimeInterval.interior, self.components))
