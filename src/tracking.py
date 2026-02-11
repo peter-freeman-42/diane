@@ -451,37 +451,12 @@ class TimeInterval:
         return self._kind is not TimeInterval.Kind.EMPTY
     
 
-    def __contains__(self, moment: object) -> bool:
-        '''Checks whether the given moment in time falls within the time
-        interval.'''
-
-        if not isinstance(moment, Timestamp):
-            return False
-
-        if self.is_empty:
-            return False
-
-        if self.is_timeline:
-            return True
-        # From this point onwards, the interval is considered to be
-        # non-empty, but not the entire timeline.
+    def __contains__(self, other: object) -> bool:
         
-        left_ok = True
-        right_ok = True
-
-        if self.start is not None:
-            if self.is_start_included:
-                left_ok = moment >= self.start
-            else:
-                left_ok = moment > self.start
-
-        if self.end is not None:
-            if self.is_end_included:
-                right_ok = moment <= self.end
-            else:
-                right_ok = moment < self.end
-            
-        return left_ok and right_ok
+        if isinstance(other, Timestamp | TimeInterval):
+            return self.contains(other)
+        else:
+            return False
     
 
     def __and__(self, other: TimeInterval) -> TimeInterval:
@@ -1076,7 +1051,7 @@ class TimeInterval:
     def is_nonempty(self) -> bool:
         '''Checks whether the time interval is non-empty.'''
 
-        return not self._kind is TimeInterval.Kind.EMPTY
+        return self._kind is not TimeInterval.Kind.EMPTY
 
 
     @property
@@ -1246,13 +1221,46 @@ class TimeInterval:
                 return self._end - self._start
         else:
             return None
+
+
+    def contains_timestamp(self, moment: Timestamp) -> bool:
+        '''Checks whether the given moment in time falls within the time
+        interval.'''
+
+        if not isinstance(moment, Timestamp):
+            return False
+
+        if self.is_empty:
+            return False
+
+        if self.is_timeline:
+            return True
+        # From this point onwards, the interval is considered to be
+        # non-empty, but not the entire timeline.
         
+        left_ok = True
+        right_ok = True
+
+        if self.start is not None:
+            if self.is_start_included:
+                left_ok = moment >= self.start
+            else:
+                left_ok = moment > self.start
+
+        if self.end is not None:
+            if self.is_end_included:
+                right_ok = moment <= self.end
+            else:
+                right_ok = moment < self.end
+            
+        return left_ok and right_ok
     
-    def contains(self, other: TimeInterval) -> bool:
+
+    def contains_timeinterval(self, interval: TimeInterval) -> bool:
         '''Checks whether this interval contains another one.'''
 
         # Any contains an empty interval.
-        if other.is_empty:
+        if interval.is_empty:
             return True
         # From this point onwards, we will consider 'other' to be
         # non-empty. An empty interval cannot contain a non-empty one.
@@ -1261,7 +1269,7 @@ class TimeInterval:
             return False
 
         # Checking the left boundary.
-        if other.start is not None:
+        if interval.start is not None:
             # 'other' is bounded on the left.
             if self.start is None:
                 # 'self' is unbounded on the left.
@@ -1269,12 +1277,12 @@ class TimeInterval:
             else:
                 # 'self' is bounded on the left.
 
-                if self.start < other.start:
+                if self.start < interval.start:
                     left_ok = True
-                elif self.start == other.start:
+                elif self.start == interval.start:
                     left_ok = (
                         self.is_start_included
-                        or not other.is_start_included
+                        or not interval.is_start_included
                     )
                 else:
                     left_ok = False
@@ -1286,7 +1294,7 @@ class TimeInterval:
             return False
 
         # Checking the right boundary.
-        if other.end is not None:
+        if interval.end is not None:
             # 'other' is bounded on the right.
             if self.end is None:
                 # 'self' is unbounded on the right.
@@ -1294,12 +1302,12 @@ class TimeInterval:
             else:
                 # 'self' is bounded on the right.
 
-                if self.end > other.end:
+                if self.end > interval.end:
                     right_ok = True
-                elif self.end == other.end:
+                elif self.end == interval.end:
                     right_ok = (
                         self.is_end_included
-                        or not other.is_end_included
+                        or not interval.is_end_included
                     )
                 else:
                     right_ok = False
@@ -1308,7 +1316,19 @@ class TimeInterval:
             right_ok = self.end is None
 
         return right_ok
-    
+
+
+    def contains(self, other: Timestamp | TimeInterval) -> bool:
+        '''Checks whether this interval contains a timestamp or another
+        time interval.'''
+
+        if isinstance(other, Timestamp):
+            return self.contains_timestamp(other)
+        elif isinstance(other, TimeInterval):
+            return self.contains_timeinterval(other)
+        else:
+            return NotImplemented
+        
 
     def is_contained_in(self, other: TimeInterval) -> bool:
         '''Checks whether a given interval is contained in another.'''
@@ -1468,7 +1488,7 @@ class TimeSet:
     unions must be disconnected. In other words, each interval
     is connected component of the 'TimeSet'.'''
 
-    _intervals: tuple[TimeInterval]
+    _intervals: tuple[TimeInterval, ...]
 
 
     def _is_valid(self) -> bool:
@@ -1509,6 +1529,14 @@ class TimeSet:
         return bool(self._intervals)
     
 
+    def __contains__(self, other: object) -> bool:
+
+        if isinstance(other, Timestamp | TimeInterval | TimeSet):
+            return self.contains(other)
+        else:
+            return False
+    
+
     def __or__(self, other: TimeInterval | TimeSet) -> TimeSet:
         '''The union of two time sets, or a time set with a time
         interval.'''
@@ -1536,18 +1564,72 @@ class TimeSet:
     
 
     def __sub__(self, other: TimeInterval | TimeSet):
-        '''The deffirence of two time sets, or a time set with a time
+        '''The difference of two time sets, or a time set with a time
         interval.'''
 
         if isinstance(other, TimeInterval):
             other = TimeSet(other)
 
-        return self & other.complement()
+        if not isinstance(other, TimeSet):
+            return NotImplemented
 
+        return self & other.complement()
+    
+
+    def contains_timestamp(self, moment: Timestamp) -> bool:
+        '''Checks whether the given moment in time falls within the time
+        set.'''
+
+        return any(moment in c for c in self.components)
+    
+
+    def contains_timeinterval(self, interval: TimeInterval) -> bool:
+        '''Checks whether the time set contains a time interval.'''
+
+        return any(interval.is_contained_in(c) for c in self.components)
+    
+
+    def contains_timeset(self, timeset: TimeSet) -> bool:
+        '''Checks whether the time set contains another one.'''
+
+        i, j = 0, 0
+
+        while j < timeset.components_number:
+            if i >= self.components_number:
+                return False
+
+            if self.components[i].contains(timeset.components[j]):
+                j += 1
+            elif self.components[i].is_left_of(timeset.components[j]):
+                i += 1
+            else:
+                return False
+
+        return True
+    
+
+    def contains(self, other: Timestamp | TimeInterval | TimeSet) -> bool:
+        '''Checks whether the time set contains another one, a time
+        interval or a time moment.'''
+
+        if isinstance(other, Timestamp):
+            return self.contains_timestamp(other)
+        elif isinstance(other, TimeInterval):
+            return self.contains_timeinterval(other)
+        elif isinstance(other, TimeSet):
+            return self.contains_timeset(other)
+        else:
+            return NotImplemented
+
+
+    def is_contained_in(self, other: TimeSet) -> bool:
+        '''Checks whether a given time set is contained in another.'''
+
+        return other.contains(self)
     
 
     def intersection_with_interval(self, other: TimeInterval) -> TimeSet:
-        '''The intersection of s time set with a time interval.'''
+        '''The intersection of the time set with a time interval.'''
 
         # The intersection with the empty set is empty.
         if self.is_empty or other.is_empty:
@@ -1566,7 +1648,7 @@ class TimeSet:
                 # The intervals overlap.
 
                 intersection_interval = i & other
-                if not intersection_interval.is_empty:
+                if intersection_interval.is_nonempty:
                     intersection_intervals.append(intersection_interval)
 
         return TimeSet(*intersection_intervals)
@@ -1610,6 +1692,64 @@ class TimeSet:
                     j += 1
 
         return TimeSet(*intersection_intervals)
+    
+
+    def overlaps_with_interval(self, interval: TimeInterval) -> bool:
+        '''Checks whether the time set overlaps with a time interval.'''
+
+        # The intersection with the empty set is empty.
+        if self.is_empty or interval.is_empty:
+            return False
+        # From this point onwards, a time set and a time interval
+        # are considered to be non-empty.
+
+        for i in self.components:
+            if i.is_left_of(interval):
+                continue
+            elif i.is_right_of(interval):
+                break
+            else:
+                # The intervals overlap.
+                return True
+
+        return False
+    
+
+    def overlaps_with_timeset(self, timeset: TimeSet) -> bool:
+        '''Checks whether the time set overlaps with another one.'''
+
+        # The intersection with the empty set is empty.
+        if self.is_empty or timeset.is_empty:
+            return False
+        # From this point onwards, time sets are considered to be
+        # non-empty.
+
+        i, j = 0, 0
+
+        while i < self.components_number and j < timeset.components_number:
+            self_interval = self.components[i]
+            other_interval = timeset.components[j]
+
+            if self_interval.is_left_of(other_interval):
+                i += 1
+            elif self_interval.is_right_of(other_interval):
+                j += 1
+            else:
+                return True
+
+        return False
+    
+
+    def overlaps(self, other: TimeInterval | TimeSet) -> bool:
+        '''Checks whether the time set overlaps with a time interval
+        or another time set.'''
+
+        if isinstance(other, TimeInterval):
+            return self.overlaps_with_interval(other)
+        elif isinstance(other, TimeSet):
+            return self.overlaps_with_timeset(other)
+        else:
+            return NotImplemented
     
 
     def complement(self) -> TimeSet:
@@ -1765,6 +1905,53 @@ class TimeSet:
         # non-empty.
 
         return all(i.is_closed for i in self._intervals)
+
+
+    @property
+    def start(self) -> Timestamp | None:
+        '''Returns the start of the time set. If it is not defined,
+        when the time set is empty or unbounded on the left, returns
+        'None'.'''
+
+        if self.is_empty:
+            return None
+        
+        return self.first_component.start
+    
+    @property
+    def end(self) -> Timestamp | None:
+        '''Returns the end of the time set. If it is not defined,
+        when the time set is empty or unbounded on the right, returns
+        'None'.'''
+
+        if self.is_empty:
+            return None
+        
+        return self.last_component.end
+    
+
+    @property
+    def inf(self) -> Timestamp | None:
+        '''Returns the infimum of the time set. If it is not defined,
+        when the time set is empty or unbounded on the left, returns
+        'None'.'''
+
+        if self.is_empty:
+            return None
+        
+        return self.first_component.start
+    
+
+    @property
+    def sup(self) -> Timestamp | None:
+        '''Returns the supremum of the time set. If it is not defined,
+        when the time set is empty or unbounded on the right, returns
+        'None'.'''
+        
+        if self.is_empty:
+            return None
+        
+        return self.last_component.end
     
 
     @property
@@ -1775,7 +1962,7 @@ class TimeSet:
     
 
     @property
-    def components(self) -> tuple[TimeInterval]:
+    def components(self) -> tuple[TimeInterval, ...]:
         '''Returns connected components of the time set.'''
         
         return self._intervals
